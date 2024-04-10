@@ -1,0 +1,134 @@
+/*
+
+* This is vesting contract written in Huff
+* It can be easily customized and deployed through cloning
+*/
+
+#include "../lib/Huff-Console/src/Console.huff"
+
+// start, duration, cliff, amount, claimable, claimed, beneficiary, token
+#define function vestingInfo() view returns (uint256, uint256, uint256, uint256, address, address, uint256, uint256)
+#define function claim() nonpayable returns ()
+
+#define constant START_TIME_OFFSET = 0xC0
+#define constant DURATION_OFFSET = 0xA0
+#define constant CLIFF_OFFSET= 0x80
+#define constant AMOUNT_OFFSET = 0x60
+#define constant BENEFICIARY_OFFSET = 0x40
+#define constant TOKEN_OFFSET = 0x20
+#define constant CLAIMED_SLOT = FREE_STORAGE_POINTER()
+
+#define macro _GET_IMMUTABLE(offset_end, free_memory) = takes (0) returns (1) {
+    0x20                        // [size]
+    <offset_end> codesize sub   // [offset_code, size]
+    <free_memory>               // [offset_memory, offset_code, size]
+    codecopy                    // []
+    <free_memory> mload         // [value]
+}
+
+
+#define macro _claimable() = takes (0) returns (1) {
+    // if (block.timestamp - start < cliff) return 0;
+    // if (block.timestamp < start) return 0;
+    // if (block.timestamp >= start + duration) return amount;
+    // else return amount * (block.timestamp - start) / duration;
+
+
+    _GET_IMMUTABLE(AMOUNT_OFFSET, 0x104)     // [amount]
+    _GET_IMMUTABLE(CLIFF_OFFSET, 0x118)      // [cliff]
+    _GET_IMMUTABLE(DURATION_OFFSET, 0x12c)   // [duration]
+    _GET_IMMUTABLE(START_TIME_OFFSET, 0x140) // [start]
+    
+
+    dup1 timestamp sub  // [block.timestamp - start, start, duration, cliff, amount]
+    dup4 gt             // [cliff > block.timestamp - start , start, duration, cliff, amount]
+    0x01 eq ZERO jumpi  
+
+    dup1 timestamp lt   // [block.timestamp < start, start, duration, cliff, amount]
+    0x01 eq ZERO jumpi 
+
+    dup1 dup3 add       // [start + duration, start, duration, cliff, amount]
+    timestamp gt        // [block.timestamp > start + duration, start, duration, cliff, amount]
+    0x01 eq VESTED jumpi
+
+    timestamp sub // [(block.timestamp - start), duration, cliff, amount]
+    dup4 mul      // [amount * (block.timestamp - start), duration, cliff, amount]
+    div           // [amount * (block.timestamp - start) / duration, cliff, amount]
+    swap2         // [amount, cliff, amount * (block.timestamp - start) / duration]
+    pop pop       // [(block.timestamp - start) / duration]
+    DONE jump
+
+    ZERO: 
+        pop pop pop pop
+        push1 0x00 // [amount]
+        DONE jump
+
+    VESTED:
+        pop pop pop // [amount]
+        DONE jump
+
+    DONE: 
+        // [result]
+}
+
+#define macro MAIN() = takes (0) returns (0) {
+    0x00 calldataload
+    0xE0 shr
+
+    dup1 __FUNC_SIG(vestingInfo) eq VESTINGINFO jumpi
+    dup1 __FUNC_SIG(claim) eq CLAIM jumpi
+
+    // Revert if no function signature matched
+    0x00 0x00 revert
+
+    VESTINGINFO:
+        _GET_IMMUTABLE(START_TIME_OFFSET,  0x00)  // [start]
+        _GET_IMMUTABLE(DURATION_OFFSET,    0x20)  // [duration]
+        _GET_IMMUTABLE(CLIFF_OFFSET,       0x40)  // [cliff]
+        _GET_IMMUTABLE(AMOUNT_OFFSET,      0x60)  // [amount]
+        _GET_IMMUTABLE(BENEFICIARY_OFFSET, 0x80)  // [beneficiary]
+        _GET_IMMUTABLE(TOKEN_OFFSET,       0xA0)  // [token]
+        [CLAIMED_SLOT] sload 0xC0 mstore          // [claimed]
+        _claimable()         0xE0 mstore          // [claimable]
+        0x158 0x00 return
+
+    CLAIM:
+        __RIGHTPAD(0xa9059cbb)                   0x20 mstore  // [func_sig]
+        _GET_IMMUTABLE(BENEFICIARY_OFFSET, 0x00) 0x24 mstore  // [func_sig, beneficiary]
+        _claimable()                             0x44 mstore  // [func_sig, beneficiary, claimableAmount]
+
+
+        0x20                               // [retSize]
+        0x20                               // [retOffset, retSize]
+        0x44                               // [inSize, retOffset, retSize]
+        0x20                               // [inOffset, inSize, retOffset, retSize]
+        0x00                               // [value inOffset, inSize, retOffset, retSize]
+        _GET_IMMUTABLE(TOKEN_OFFSET, 0x00) // [token, value, inOffset, inSize, retOffset, retSize]
+        gas                                // [gas, token, value, inOffset, inSize, retOffset, retSize]
+        call                               // [success]
+
+        0x20 mload            // [returnData, success]
+        0x01 eq               // [returnData == 1, success]
+        returndatasize iszero // [returnDataSize == 0, returnData == 1, success]
+        or                    // [returnDataSize == 0 || returnData == 1, success]
+        and success jumpi     // [(returnDataSize == 0 || returnData == 1) && success]
+        0x00 dup1 revert       
+        success:
+
+        0x00 0x00 return
+
+}
+
+
+#define macro CONSTRUCTOR() = takes (0) returns (0) {
+    __codesize(CONSTRUCTOR)                 // [offset] - constructor code size
+    dup1                                    // [offset, offset]
+    codesize                                // [total_size, offset, offset]
+    sub                                     // [runtime_size, offset]
+    dup1                                    // [runtime_size, runtime_size, offset]
+    swap2                                   // [offset, runtime_size, runtime_size]
+    returndatasize                          // [return_offset, offset, runtime_size, runtime_size]
+    codecopy                                // [runtime_size]
+    returndatasize                          // [return_offset, runtime_size]
+    return      
+}
