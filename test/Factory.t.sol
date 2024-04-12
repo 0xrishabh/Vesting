@@ -1,5 +1,5 @@
-
 pragma solidity ^0.8.24;
+
 import "forge-std/Test.sol";
 import {Factory} from "src/Factory.sol";
 import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
@@ -19,6 +19,7 @@ interface IVesting {
     function claim() external;
     function vestingInfo() external view returns (VestingInfo memory info);
 }
+
 contract USDC is ERC20 {
     constructor() ERC20("USDC", "USDC") {}
 
@@ -26,6 +27,7 @@ contract USDC is ERC20 {
         _mint(to, amount);
     }
 }
+
 contract FactroyTest is Test {
     Factory factory;
     uint256 start;
@@ -34,11 +36,13 @@ contract FactroyTest is Test {
     uint256 amount;
     address token;
     address beneficiary;
+
     function setUp() public {
         token = address(new USDC());
         factory = new Factory();
         deal(token, address(this), 100_000e18);
     }
+
     function testNewVesting() public {
         start = block.timestamp;
         duration = 365 days;
@@ -48,7 +52,7 @@ contract FactroyTest is Test {
 
         ERC20(token).approve(address(factory), amount);
         address vesting = factory.newVesting(start, duration, cliff, amount, beneficiary, token);
-        
+
         IVesting.VestingInfo memory info = IVesting(vesting).vestingInfo();
         assertEq(info.start, block.timestamp);
         assertEq(info.duration, duration);
